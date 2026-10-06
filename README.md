@@ -1,24 +1,110 @@
 # PFO 2: Sistema de Gestión de Tareas con API y Base de Datos
 
-Programación sobre Redes, Tecnicatura Superior en Desarrollo de Software (IFTS N° 29)
+**Programación sobre Redes** · Tecnicatura Superior en Desarrollo de Software · IFTS N.° 29
+Alumno: Fernando Rodriguez · 5.° Cuatrimestre · 2026
+
+Documentación publicada: https://ferchulobo777.github.io/pfo2-gestion-tareas/
+
+## Tabla de contenidos
+
+1. [Descripción](#descripción)
+2. [Funcionalidades](#funcionalidades)
+3. [Arquitectura](#arquitectura)
+4. [Tecnologías](#tecnologías)
+5. [Instalación](#instalación)
+6. [Ejecución](#ejecución)
+7. [Documentación de la API](#documentación-de-la-api)
+8. [Cliente de consola](#cliente-de-consola)
+9. [Modelo de datos](#modelo-de-datos)
+10. [Seguridad](#seguridad)
+11. [Pruebas](#pruebas)
+12. [Estructura del proyecto](#estructura-del-proyecto)
+13. [Respuestas conceptuales](#respuestas-conceptuales)
+14. [Limitaciones y mejoras posibles](#limitaciones-y-mejoras-posibles)
 
 ## Descripción
 
-API REST desarrollada con Flask. Permite registrar usuarios, iniciar sesión y acceder a una página de bienvenida (`/tareas`) que solo se muestra a quien ya inició sesión. Los usuarios se guardan en SQLite y la contraseña se almacena como hash, nunca en texto plano. También incluye un cliente de consola que consume la API.
+API REST desarrollada con Flask que permite registrar usuarios, iniciar sesión y acceder a una página de bienvenida (`/tareas`) disponible solo para usuarios autenticados. Los usuarios se persisten en una base SQLite y las contraseñas se almacenan como hash con sal, nunca en texto plano. El proyecto incluye además un cliente de consola que consume la API mediante HTTP y JSON.
 
-Documentación publicada con GitHub Pages: https://ferchulobo777.github.io/pfo2-gestion-tareas/ (se genera desde la carpeta `docs/`).
+Consigna de la cátedra: implementar una API REST con endpoints funcionales, autenticación básica con protección de contraseñas, persistencia en SQLite y un cliente de consola que interactúe con la API.
 
-## Requisitos
+## Funcionalidades
 
-- Python 3.9 o superior
-- Flask (incluye `werkzeug`, que se usa para hashear las contraseñas)
-- requests (solo lo usa el cliente de consola)
+- Registro de usuarios con validación de los datos recibidos y restricción de nombre único.
+- Almacenamiento de contraseñas con `generate_password_hash` (scrypt con sal aleatoria).
+- Inicio de sesión que verifica el hash y abre una sesión mediante una cookie firmada.
+- Ruta `/tareas` protegida: responde 401 sin sesión y devuelve un HTML de bienvenida con sesión iniciada.
+- Códigos de estado HTTP coherentes (201, 200, 400, 401, 409, 500) y respuestas de error en JSON.
+- Detección de puerto ocupado antes de iniciar el servidor.
+- Cliente de consola con menú, manejo de servidor caído y lectura de la contraseña sin eco.
+
+## Arquitectura
+
+```mermaid
+flowchart LR
+    C1[cliente.py<br/>cliente de consola] -->|HTTP + JSON| API
+    C2[curl / navegador] -->|HTTP + JSON| API
+    subgraph Servidor
+        API[servidor.py<br/>Flask] --> H[werkzeug.security<br/>hash y verificación]
+        API --> DB[(usuarios.db<br/>SQLite)]
+    end
+```
+
+Flujo de autenticación y acceso a `/tareas`:
+
+```mermaid
+sequenceDiagram
+    participant C as Cliente
+    participant S as Servidor Flask
+    participant D as SQLite
+    C->>S: POST /registro {usuario, contraseña}
+    S->>S: generate_password_hash(contraseña)
+    S->>D: INSERT usuario, password_hash
+    S-->>C: 201 Created
+    C->>S: POST /login {usuario, contraseña}
+    S->>D: SELECT password_hash WHERE usuario = ?
+    S->>S: check_password_hash(hash, contraseña)
+    S-->>C: 200 OK + Set-Cookie: session
+    C->>S: GET /tareas (Cookie: session)
+    S-->>C: 200 OK, HTML de bienvenida
+```
+
+## Tecnologías
+
+| Componente | Uso |
+|---|---|
+| Python 3.9 o superior | Lenguaje del servidor y del cliente |
+| Flask | Framework web y enrutamiento de la API |
+| werkzeug.security | Hash y verificación de contraseñas (se instala junto con Flask) |
+| sqlite3 | Persistencia de los usuarios (módulo de la biblioteca estándar) |
+| requests | Pedidos HTTP del cliente de consola |
+| GitHub Pages | Publicación de la documentación desde `docs/` |
+
+## Instalación
+
+```bash
+git clone https://github.com/Ferchulobo777/pfo2-gestion-tareas.git
+cd pfo2-gestion-tareas
+python -m venv venv
+```
+
+Activar el entorno virtual:
+
+```
+# Windows
+venv\Scripts\activate
+
+# Linux o macOS
+source venv/bin/activate
+```
+
+Instalar las dependencias:
 
 ```
 pip install -r requirements.txt
 ```
 
-## Cómo ejecutar
+## Ejecución
 
 1. Iniciar el servidor:
 
@@ -26,27 +112,70 @@ pip install -r requirements.txt
 python servidor.py
 ```
 
-Debe mostrar `Running on http://127.0.0.1:5000`. Al iniciar crea el archivo `usuarios.db` si todavía no existe.
+Debe mostrar `Running on http://127.0.0.1:5000`. Al iniciar crea el archivo `usuarios.db` y la tabla `usuarios` si todavía no existen. Si el puerto 5000 está ocupado, el servidor informa el error y no inicia.
 
-2. En otra terminal, iniciar el cliente de consola:
+2. En otra terminal (con el entorno virtual activado), iniciar el cliente:
 
 ```
 python cliente.py
 ```
 
-Opciones del menú: 1 registrarse, 2 iniciar sesión, 3 ver tareas, 4 salir.
+Variable opcional: `SECRET_KEY` define la clave con la que se firma la cookie de sesión. Si no se define, se genera una aleatoria al iniciar y las sesiones se pierden al reiniciar el servidor.
 
-## Endpoints
+```
+# Windows (PowerShell)
+$env:SECRET_KEY = "clave-larga-y-aleatoria"
 
-| Método | Ruta | Descripción | Respuestas |
-|---|---|---|---|
-| POST | `/registro` | Crea un usuario. Recibe `{"usuario": "nombre", "contraseña": "1234"}` | 201 creado, 400 datos inválidos, 409 usuario existente |
-| POST | `/login` | Verifica las credenciales e inicia la sesión (cookie firmada) | 200 correcto, 400 datos inválidos, 401 credenciales incorrectas |
-| GET | `/tareas` | Devuelve el HTML de bienvenida. Requiere sesión iniciada | 200 con HTML, 401 sin sesión |
+# Linux o macOS
+export SECRET_KEY="clave-larga-y-aleatoria"
+```
 
-## Cómo probarlo
+## Documentación de la API
 
-### Con curl (en Windows se usa `curl.exe`)
+Base URL: `http://127.0.0.1:5000`. Las solicitudes con cuerpo usan `Content-Type: application/json`.
+
+### POST /registro
+
+Crea un usuario y guarda su contraseña como hash.
+
+Cuerpo:
+
+```json
+{"usuario": "fernando", "contraseña": "1234"}
+```
+
+| Código | Cuerpo | Cuándo |
+|---|---|---|
+| 201 | `{"mensaje": "Usuario registrado correctamente"}` | Registro correcto |
+| 400 | `{"error": "Se espera un JSON con \"usuario\" y \"contraseña\" no vacíos"}` | Cuerpo que no es JSON, campos ausentes, vacíos o que no son texto |
+| 409 | `{"error": "El usuario ya existe"}` | Nombre de usuario repetido |
+| 500 | `{"error": "Error del servidor al guardar el usuario"}` | Falla de la base de datos |
+
+### POST /login
+
+Verifica las credenciales e inicia la sesión. En caso de éxito la respuesta incluye la cookie `session`.
+
+Cuerpo: igual que en `/registro`.
+
+| Código | Cuerpo | Cuándo |
+|---|---|---|
+| 200 | `{"mensaje": "Inicio de sesión exitoso"}` y `Set-Cookie: session=...; HttpOnly; Path=/` | Credenciales correctas |
+| 400 | `{"error": "Se espera un JSON con ..."}` | Datos inválidos |
+| 401 | `{"error": "Usuario o contraseña incorrectos"}` | Usuario inexistente o contraseña incorrecta (mismo mensaje en ambos casos) |
+| 500 | `{"error": "Error del servidor al consultar el usuario"}` | Falla de la base de datos |
+
+### GET /tareas
+
+Devuelve el HTML de bienvenida. Requiere la cookie de sesión obtenida en `/login`.
+
+| Código | Cuerpo | Cuándo |
+|---|---|---|
+| 200 | HTML con `¡Bienvenido, <usuario>!` | Sesión iniciada |
+| 401 | `{"error": "Acceso denegado: primero hay que iniciar sesión en /login"}` | Sin sesión |
+
+### Ejemplos con curl
+
+En Windows se usa `curl.exe` (en PowerShell `curl` es un alias de otro comando).
 
 ```
 curl.exe -i -X POST http://127.0.0.1:5000/registro -H "Content-Type: application/json" -d "{\"usuario\": \"fernando\", \"contraseña\": \"1234\"}"
@@ -56,60 +185,119 @@ curl.exe -i -c cookies.txt -X POST http://127.0.0.1:5000/login -H "Content-Type:
 curl.exe -b cookies.txt http://127.0.0.1:5000/tareas
 ```
 
-La opción `-c` guarda la cookie de sesión que devuelve el login y `-b` la envía en el pedido siguiente. Sin la cookie, `/tareas` responde 401.
+En Linux o macOS:
 
-### Casos que se verificaron
+```
+curl -i -X POST http://127.0.0.1:5000/registro -H "Content-Type: application/json" -d '{"usuario": "fernando", "contraseña": "1234"}'
 
-- Registro de un usuario nuevo: 201.
-- Registro del mismo usuario por segunda vez: 409.
-- Login con contraseña incorrecta: 401.
-- `GET /tareas` sin haber iniciado sesión: 401.
-- Login correcto y luego `GET /tareas`: 200 con la página de bienvenida.
-- Contenido de la tabla `usuarios`, donde la contraseña figura como hash: `sqlite3 usuarios.db "SELECT usuario, password_hash FROM usuarios;"`
+curl -i -c cookies.txt -X POST http://127.0.0.1:5000/login -H "Content-Type: application/json" -d '{"usuario": "fernando", "contraseña": "1234"}'
 
-## Capturas de pantalla de las pruebas
+curl -b cookies.txt http://127.0.0.1:5000/tareas
+```
 
-| Archivo | Prueba |
+La opción `-c` guarda la cookie de sesión y `-b` la envía en el pedido siguiente.
+
+## Cliente de consola
+
+`cliente.py` presenta un menú con cuatro opciones: registrarse, iniciar sesión, ver tareas y salir. Usa `requests.Session`, que conserva la cookie recibida en el login y la reenvía en los pedidos siguientes. La contraseña se lee con `getpass`, por lo que no se muestra al escribirla. Si el servidor no está disponible o no responde dentro de 5 segundos, informa el error y vuelve al menú.
+
+## Modelo de datos
+
+Base SQLite `usuarios.db`, tabla `usuarios`:
+
+| Campo | Tipo | Restricciones | Descripción |
+|---|---|---|---|
+| id | INTEGER | PRIMARY KEY AUTOINCREMENT | Identificador |
+| usuario | TEXT | NOT NULL, UNIQUE | Nombre de usuario |
+| password_hash | TEXT | NOT NULL | Hash de la contraseña calculado con `werkzeug.security` |
+| fecha_registro | TEXT | NOT NULL | Fecha y hora del registro (`AAAA-MM-DD HH:MM:SS`) |
+
+Formato del hash almacenado: `scrypt:32768:8:1$<sal>$<hash>`, donde 32768, 8 y 1 son los parámetros N, r y p del algoritmo.
+
+## Seguridad
+
+| Medida | Implementación |
 |---|---|
-| `docs/capturas/01-registro.png` | Registro de usuario (201) |
-| `docs/capturas/02-login.png` | Inicio de sesión (200) |
-| `docs/capturas/03-tareas.png` | Página de bienvenida en `/tareas` |
-| `docs/capturas/04-hash-en-bd.png` | Contraseña almacenada como hash en SQLite |
-| `docs/capturas/05-casos-error.png` | Respuestas 409 y 401 |
-| `docs/capturas/06-cliente-consola.png` | Sesión completa con el cliente de consola |
+| Contraseñas hasheadas | `generate_password_hash` con scrypt y sal aleatoria por usuario |
+| Verificación | `check_password_hash` sobre el hash guardado; nunca se compara texto plano |
+| Inyección SQL | Todas las consultas usan parámetros (`?`) |
+| XSS | El nombre de usuario se escapa con `escape()` al construir el HTML de `/tareas` |
+| Enumeración de usuarios | `/login` devuelve el mismo mensaje si falla el usuario o la contraseña |
+| Sesión | Cookie firmada con `secret_key`, con el atributo HttpOnly (no accesible desde JavaScript) |
+| Validación de entrada | Se exige un JSON con `usuario` y `contraseña` de tipo texto y no vacíos |
+| Conexiones a la base | Una conexión por pedido, cerrada al finalizar, porque `sqlite3` no comparte conexiones entre hilos |
+| Puerto ocupado | Se prueba el puerto con un socket común antes de iniciar. El servidor de desarrollo de Flask usa `SO_REUSEADDR`, que en Windows permite que dos procesos escuchen el mismo puerto sin error |
 
-## Estructura
+## Pruebas
 
-- `servidor.py`: API Flask con SQLite (registro, login y tareas).
-- `cliente.py`: cliente de consola que consume la API.
-- `requirements.txt`: dependencias.
-- `usuarios.db`: base SQLite. Se crea al iniciar el servidor y no se versiona.
-- `docs/`: sitio publicado con GitHub Pages.
+Las pruebas se ejecutaron con el servidor en `127.0.0.1:5000`. Resultados verificados:
 
-## Base de datos
+| N.° | Caso | Resultado esperado | Resultado |
+|---|---|---|---|
+| 1 | `GET /tareas` sin sesión | 401 | Correcto |
+| 2 | `POST /registro` con datos válidos | 201 | Correcto |
+| 3 | `POST /registro` con un usuario ya existente | 409 | Correcto |
+| 4 | `POST /registro` con un cuerpo que no es JSON | 400 | Correcto |
+| 5 | `POST /registro` sin el campo `contraseña` | 400 | Correcto |
+| 6 | `POST /registro` con campos que no son texto | 400 | Correcto |
+| 7 | `POST /login` con contraseña incorrecta | 401 | Correcto |
+| 8 | `POST /login` con un usuario inexistente | 401 | Correcto |
+| 9 | `POST /login` con credenciales correctas | 200 y cookie de sesión | Correcto |
+| 10 | `GET /tareas` con la cookie de sesión | 200 y HTML de bienvenida | Correcto |
+| 11 | Usuario con etiquetas HTML en el nombre | El HTML se muestra escapado | Correcto |
+| 12 | Contenido de la tabla `usuarios` | `password_hash` sin texto plano | Correcto |
+| 13 | Segundo `python servidor.py` con el puerto ocupado | Mensaje de error y salida sin iniciar | Correcto |
 
-Tabla `usuarios`:
+Para ver el hash almacenado:
 
-| Campo | Tipo | Descripción |
-|---|---|---|
-| id | INTEGER | Clave primaria autoincremental |
-| usuario | TEXT | Nombre de usuario (único) |
-| password_hash | TEXT | Hash de la contraseña calculado con `werkzeug.security` |
-| fecha_registro | TEXT | Fecha y hora del registro |
+```
+sqlite3 usuarios.db "SELECT usuario, password_hash FROM usuarios;"
+```
 
-## Decisiones técnicas
+### Capturas
 
-- Hash de contraseñas: se usan `generate_password_hash` y `check_password_hash` de `werkzeug.security`. El hash incluye una sal aleatoria, por lo que dos usuarios con la misma contraseña tienen hashes distintos.
-- Sesión: al iniciar sesión, Flask guarda el usuario en una cookie firmada con `secret_key`. La ruta `/tareas` consulta esa cookie para permitir o negar el acceso. La clave puede definirse con la variable de entorno `SECRET_KEY`; si no existe, se genera una aleatoria al iniciar el servidor.
-- Login: si falla el usuario o la contraseña se devuelve el mismo mensaje, para no revelar qué usuarios existen.
-- Seguridad de las consultas: las sentencias SQL son parametrizadas (`?`) para evitar inyección SQL, y el nombre de usuario se escapa al armar el HTML de `/tareas`.
-- Puerto ocupado: antes de iniciar Flask se prueba abrir el puerto con un socket común. El servidor de desarrollo de Flask usa `SO_REUSEADDR`, que en Windows permite que dos procesos escuchen en el mismo puerto sin error.
+Registro de usuario (201):
+
+![Registro de usuario](docs/capturas/01-registro.png)
+
+Inicio de sesión (200) con la cookie de sesión:
+
+![Inicio de sesión](docs/capturas/02-login.png)
+
+Página de bienvenida en `/tareas` con la sesión iniciada:
+
+![Página de bienvenida](docs/capturas/03-tareas.png)
+
+Contraseña almacenada como hash en SQLite:
+
+![Hash en la base de datos](docs/capturas/04-hash-en-bd.png)
+
+Respuestas de error (409 y 401):
+
+![Casos de error](docs/capturas/05-casos-error.png)
+
+Sesión completa con el cliente de consola:
+
+![Cliente de consola](docs/capturas/06-cliente-consola.png)
+
+## Estructura del proyecto
+
+| Ruta | Contenido |
+|---|---|
+| `servidor.py` | API Flask con SQLite (registro, login y tareas) |
+| `cliente.py` | Cliente de consola que consume la API |
+| `requirements.txt` | Dependencias |
+| `README.md` | Documentación del proyecto |
+| `.gitignore` | Archivos excluidos del repositorio |
+| `usuarios.db` | Base SQLite (se crea al iniciar el servidor, no se versiona) |
+| `docs/index.html` | Sitio publicado con GitHub Pages |
+| `docs/capturas/` | Capturas de las pruebas |
 
 ## Respuestas conceptuales
 
 ### ¿Por qué hashear contraseñas?
 
-Porque la base de datos puede filtrarse por una vulnerabilidad, un backup mal protegido o el acceso de una persona no autorizada. Si las contraseñas estuvieran en texto plano, quien obtenga la base tendría de inmediato las credenciales de todos los usuarios, y como muchas personas repiten la misma contraseña en varios servicios, también podría ingresar a esas otras cuentas.
+Porque la base de datos puede filtrarse por una vulnerabilidad, un backup mal protegido o el acceso de una persona no autorizada. Si las contraseñas estuvieran en texto plano, quien obtenga la base tendría de inmediato las credenciales de todos los usuarios y, como muchas personas repiten la misma contraseña en varios servicios, también podría ingresar a esas otras cuentas.
 
 Un hash es una función de un solo sentido: a partir de la contraseña se calcula el hash, pero no se puede recorrer el camino inverso. Para validar un login, el servidor calcula el hash de lo que escribió el usuario y lo compara con el hash guardado, sin necesidad de conocer ni almacenar la contraseña original.
 
@@ -123,4 +311,14 @@ Además, las librerías actuales agregan una sal aleatoria a cada contraseña, l
 - Es portable: todo está en un archivo que se copia, respalda o elimina fácilmente.
 - Los datos persisten cuando se reinicia el servidor, a diferencia de guardarlos en memoria.
 - Usa SQL estándar y soporta transacciones, lo que permite restricciones como `UNIQUE` sobre el usuario y consultas parametrizadas.
-- Es suficiente para la escala del proyecto, con pocos usuarios y poca concurrencia. Si hubiera muchos usuarios escribiendo a la vez, convendría migrar a un motor cliente servidor como PostgreSQL o MySQL.
+- Es suficiente para la escala del proyecto, con pocos usuarios y poca concurrencia. Con muchos usuarios escribiendo a la vez convendría migrar a un motor cliente servidor como PostgreSQL o MySQL.
+
+## Limitaciones y mejoras posibles
+
+- Servir la API por HTTPS (TLS) y configurar la cookie con los atributos `Secure` y `SameSite`. En el estado actual el tráfico viaja sin cifrar, por lo que el uso queda limitado al entorno local.
+- Limitar los intentos de login por usuario o por IP para dificultar los ataques de fuerza bruta.
+- Definir una política de contraseñas (longitud mínima y complejidad) en `/registro`.
+- Agregar un endpoint de cierre de sesión (`/logout`) y protección CSRF si se incorporan formularios.
+- Ejecutar con un servidor WSGI (waitress o gunicorn) en lugar del servidor de desarrollo de Flask.
+- Implementar la gestión de tareas propiamente dicha (alta, consulta, modificación y baja por usuario). La consigna solo pide la página de bienvenida en `/tareas`.
+- Agregar pruebas automatizadas (`pytest` con el cliente de pruebas de Flask).
