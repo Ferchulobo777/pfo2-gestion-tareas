@@ -34,6 +34,7 @@ Consigna de la cátedra: implementar una API REST con endpoints funcionales, aut
 - Almacenamiento de contraseñas con `generate_password_hash` (scrypt con sal aleatoria).
 - Inicio de sesión que verifica el hash y abre una sesión mediante una cookie firmada.
 - Ruta `/tareas` protegida: responde 401 sin sesión y devuelve un HTML de bienvenida con sesión iniciada.
+- Formularios HTML en `/registro` y `/login` (método GET) para usar la API desde el navegador, y redirección de `/` al login. Un navegador que pide `/tareas` sin sesión recibe una página con el enlace al login.
 - Códigos de estado HTTP coherentes (201, 200, 400, 401, 409, 500) y respuestas de error en JSON.
 - Detección de puerto ocupado antes de iniciar el servidor.
 - Cliente de consola con menú, manejo de servidor caído y lectura de la contraseña sin eco.
@@ -120,6 +121,8 @@ Debe mostrar `Running on http://127.0.0.1:5000`. Al iniciar crea el archivo `usu
 python cliente.py
 ```
 
+3. Uso desde el navegador: abrir http://127.0.0.1:5000/ (redirige al login). El flujo es: crear una cuenta en `/registro`, iniciar sesión en `/login` y ver la bienvenida en `/tareas`.
+
 Variable opcional: `SECRET_KEY` define la clave con la que se firma la cookie de sesión. Si no se define, se genera una aleatoria al iniciar y las sesiones se pierden al reiniciar el servidor.
 
 ```
@@ -171,7 +174,16 @@ Devuelve el HTML de bienvenida. Requiere la cookie de sesión obtenida en `/logi
 | Código | Cuerpo | Cuándo |
 |---|---|---|
 | 200 | HTML con `¡Bienvenido, <usuario>!` | Sesión iniciada |
-| 401 | `{"error": "Acceso denegado: primero hay que iniciar sesión en /login"}` | Sin sesión |
+| 401 | `{"error": "Acceso denegado: primero hay que iniciar sesión en /login"}` | Sin sesión, cliente que no es un navegador (curl, requests) |
+| 401 | Página HTML "Acceso restringido" con enlace a `/login` | Sin sesión, navegador (la cabecera `Accept` incluye `text/html`) |
+
+### Rutas para el navegador
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| GET | `/` | Redirección 302 a `/login` |
+| GET | `/login` | Formulario HTML de inicio de sesión; envía los datos como JSON a `POST /login` y, si son correctos, redirige a `/tareas` |
+| GET | `/registro` | Formulario HTML de registro; envía los datos como JSON a `POST /registro` y, si son correctos, redirige a `/login` |
 
 ### Ejemplos con curl
 
@@ -230,23 +242,21 @@ Formato del hash almacenado: `scrypt:32768:8:1$<sal>$<hash>`, donde 32768, 8 y 1
 
 ## Pruebas
 
-Las pruebas se ejecutaron con el servidor en `127.0.0.1:5000`. Resultados verificados:
+Las pruebas se ejecutaron contra el servidor real (`127.0.0.1:5000`) con Python 3.9, Flask 3.1 y SQLite 3.44, en Windows 11. Se realizaron 67 casos automatizados contra el servidor en ejecución y un recorrido completo manual en un navegador. Todos dieron el resultado esperado.
 
-| N.° | Caso | Resultado esperado | Resultado |
-|---|---|---|---|
-| 1 | `GET /tareas` sin sesión | 401 | Correcto |
-| 2 | `POST /registro` con datos válidos | 201 | Correcto |
-| 3 | `POST /registro` con un usuario ya existente | 409 | Correcto |
-| 4 | `POST /registro` con un cuerpo que no es JSON | 400 | Correcto |
-| 5 | `POST /registro` sin el campo `contraseña` | 400 | Correcto |
-| 6 | `POST /registro` con campos que no son texto | 400 | Correcto |
-| 7 | `POST /login` con contraseña incorrecta | 401 | Correcto |
-| 8 | `POST /login` con un usuario inexistente | 401 | Correcto |
-| 9 | `POST /login` con credenciales correctas | 200 y cookie de sesión | Correcto |
-| 10 | `GET /tareas` con la cookie de sesión | 200 y HTML de bienvenida | Correcto |
-| 11 | Usuario con etiquetas HTML en el nombre | El HTML se muestra escapado | Correcto |
-| 12 | Contenido de la tabla `usuarios` | `password_hash` sin texto plano | Correcto |
-| 13 | Segundo `python servidor.py` con el puerto ocupado | Mensaje de error y salida sin iniciar | Correcto |
+| Categoría | Casos | Qué se verifica |
+|---|---|---|
+| Funcionalidad de la API | 7 | Registro (201), usuario repetido (409), login correcto (200), contraseña incorrecta y usuario inexistente (401), `/tareas` con y sin sesión |
+| Validación de entradas y rutas | 16 | Cuerpo que no es JSON, JSON malformado, lista o nulos, campos ausentes, vacíos o que no son texto, espacios en el nombre, `Content-Type` incorrecto, usuario de 5000 caracteres, métodos no permitidos (405) y rutas inexistentes (404) |
+| Caracteres especiales y datos extremos | 4 | Acentos, ñ y emoji en usuario y contraseña, contraseña de 100000 caracteres |
+| Seguridad | 14 | Inyección SQL (4 variantes en login y una en registro), integridad de la tabla, XSS en el nombre, cookie adulterada, inventada o basura, cookie legítima, atributo HttpOnly, hash almacenado sin texto plano |
+| Navegador y formularios | 8 | `/` redirige a `/login`, formularios de login y registro, página de acceso restringido para navegadores y JSON para otros clientes, cabecera `Accept` real de Chrome |
+| Concurrencia | 2 | 25 registros simultáneos del mismo usuario: exactamente un 201, 24 respuestas 409 y una sola fila en la base |
+| Persistencia y sesión | 4 | Los usuarios persisten al reiniciar el servidor; la sesión sigue válida con la misma `SECRET_KEY` y deja de serlo con otra |
+| Errores de infraestructura | 4 | Segundo servidor con el puerto ocupado, base de datos inaccesible al iniciar (mensaje claro, sin traceback), tabla inexistente en funcionamiento (500 en JSON) |
+| Cliente de consola | 8 | Registro, usuario repetido, login incorrecto y correcto, ver tareas, opción inválida, usuario vacío, servidor caído |
+
+Recorrido manual en el navegador: `/tareas` sin sesión muestra la página de acceso restringido, el enlace lleva a `/login`, desde ahí se abre `/registro`, se crea un usuario, se prueba una contraseña incorrecta (el formulario muestra el error), se inicia sesión con la contraseña correcta y se llega a la bienvenida en `/tareas`.
 
 Para ver el hash almacenado:
 
@@ -279,6 +289,14 @@ Respuestas de error (409 y 401):
 Sesión completa con el cliente de consola:
 
 ![Cliente de consola](docs/capturas/06-cliente-consola.png)
+
+Formulario de inicio de sesión en el navegador:
+
+![Formulario de login](docs/capturas/07-navegador-login.png)
+
+Acceso a `/tareas` sin sesión desde un navegador:
+
+![Acceso restringido](docs/capturas/08-navegador-acceso-restringido.png)
 
 ## Estructura del proyecto
 

@@ -31,6 +31,7 @@
         <tr><td>POST</td><td><code>/registro</code></td><td>Crea un usuario con <code>{"usuario": "...", "contraseña": "..."}</code> y guarda el hash en SQLite.</td></tr>
         <tr><td>POST</td><td><code>/login</code></td><td>Verifica las credenciales e inicia la sesión.</td></tr>
         <tr><td>GET</td><td><code>/tareas</code></td><td>Muestra el HTML de bienvenida. Requiere sesión iniciada.</td></tr>
+        <tr><td>GET</td><td><code>/login</code> y <code>/registro</code></td><td>Formularios HTML para usar la API desde el navegador.</td></tr>
     </table>
 
     <h2>Ejecución</h2>
@@ -39,6 +40,7 @@ python servidor.py
 python cliente.py   # en otra terminal</pre>
 
     <h2>Pruebas realizadas</h2>
+    <p>Se ejecutaron 67 casos automatizados contra el servidor en funcionamiento (funcionalidad de la API, validación de entradas, caracteres especiales, seguridad, formularios y navegador, concurrencia, persistencia, errores de infraestructura y cliente de consola) y un recorrido manual completo en un navegador. Todos dieron el resultado esperado. El detalle está en el README del repositorio.</p>
     <figure>
         <img src="capturas/01-registro.png" alt="Registro de usuario">
         <figcaption>Registro de usuario (201).</figcaption>
@@ -62,6 +64,14 @@ python cliente.py   # en otra terminal</pre>
     <figure>
         <img src="capturas/06-cliente-consola.png" alt="Cliente de consola">
         <figcaption>Sesión completa con el cliente de consola.</figcaption>
+    </figure>
+    <figure>
+        <img src="capturas/07-navegador-login.png" alt="Formulario de login en el navegador">
+        <figcaption>Formulario de inicio de sesión en el navegador.</figcaption>
+    </figure>
+    <figure>
+        <img src="capturas/08-navegador-acceso-restringido.png" alt="Acceso restringido a /tareas">
+        <figcaption>Acceso a <code>/tareas</code> sin sesión desde un navegador.</figcaption>
     </figure>
 
     <h2>Respuestas conceptuales</h2>

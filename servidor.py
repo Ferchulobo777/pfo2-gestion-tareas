@@ -4,7 +4,7 @@ import socket
 import sqlite3
 import datetime
 
-from flask import Flask, jsonify, request, session
+from flask import Flask, jsonify, redirect, request, session
 from markupsafe import escape
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -20,6 +20,62 @@ app.json.ensure_ascii = False
 # Clave con la que Flask firma la cookie de sesión. Se puede fijar con la variable de
 # entorno SECRET_KEY; si no existe se genera una aleatoria (las sesiones no sobreviven al reinicio)
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+
+
+# Plantilla HTML de los formularios que se usan desde el navegador (registro y login).
+# Los marcadores __X__ se reemplazan en pagina_formulario()
+FORMULARIO = """<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>__TITULO__</title>
+    <style>
+        body { font-family: sans-serif; max-width: 360px; margin: 3rem auto; }
+        input, button { display: block; width: 100%; margin: 0.5rem 0; padding: 0.5rem; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+    <h1>__TITULO__</h1>
+    <form id="formulario">
+        <input id="usuario" placeholder="Usuario" required>
+        <input id="contrasenia" type="password" placeholder="Contraseña" required>
+        <button type="submit">__BOTON__</button>
+    </form>
+    <p id="mensaje"></p>
+    <p><a href="__ENLACE__">__TEXTO_ENLACE__</a></p>
+    <script>
+        // Envía las credenciales como JSON al endpoint POST y muestra la respuesta del servidor
+        const destino = "__DESTINO__";
+        document.getElementById("formulario").addEventListener("submit", async (evento) => {
+            evento.preventDefault();
+            const respuesta = await fetch("__RUTA__", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    usuario: document.getElementById("usuario").value,
+                    "contraseña": document.getElementById("contrasenia").value
+                })
+            });
+            const datos = await respuesta.json();
+            document.getElementById("mensaje").textContent = datos.mensaje || datos.error;
+            if (respuesta.ok) { window.location = destino; }
+        });
+    </script>
+</body>
+</html>"""
+
+# Página que ve el navegador al pedir /tareas sin haber iniciado sesión
+ACCESO_RESTRINGIDO = """<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>Acceso restringido</title>
+</head>
+<body>
+    <h1>Acceso restringido</h1>
+    <p>Para ver las tareas primero hay que <a href="/login">iniciar sesión</a>.</p>
+</body>
+</html>"""
 
 
 def conectar_bd():
@@ -60,6 +116,34 @@ def leer_credenciales():
     if not usuario or not contrasenia:
         return None, None
     return usuario, contrasenia
+
+
+def pagina_formulario(titulo, boton, ruta, destino, enlace, texto_enlace):
+    # Arma la página con el formulario que envía los datos a la ruta POST indicada
+    pagina = FORMULARIO
+    for marcador, valor in (("__TITULO__", titulo), ("__BOTON__", boton), ("__RUTA__", ruta),
+                            ("__DESTINO__", destino), ("__ENLACE__", enlace), ("__TEXTO_ENLACE__", texto_enlace)):
+        pagina = pagina.replace(marcador, valor)
+    return pagina
+
+
+# La raíz redirige al formulario de login
+@app.route("/", methods=["GET"])
+def inicio():
+    return redirect("/login")
+
+
+# Formularios para usar la API desde el navegador (GET); el procesamiento está en las rutas POST
+@app.route("/registro", methods=["GET"])
+def pagina_registro():
+    return pagina_formulario("Registro de usuario", "Registrarse", "/registro", "/login",
+                             "/login", "Ya tengo cuenta: iniciar sesión")
+
+
+@app.route("/login", methods=["GET"])
+def pagina_login():
+    return pagina_formulario("Iniciar sesión", "Ingresar", "/login", "/tareas",
+                             "/registro", "Crear una cuenta")
 
 
 # Endpoint de registro: guarda el usuario con la contraseña hasheada
@@ -122,6 +206,10 @@ def login():
 def tareas():
     usuario = session.get("usuario")
     if usuario is None:
+        # Un navegador (su cabecera Accept nombra text/html) recibe una página con el enlace
+        # al login; el resto de los clientes (curl, requests envían */*) reciben el error en JSON
+        if "text/html" in request.headers.get("Accept", ""):
+            return ACCESO_RESTRINGIDO, 401
         return jsonify(error="Acceso denegado: primero hay que iniciar sesión en /login"), 401
 
     # escape() evita que un nombre de usuario con HTML se interprete como código (XSS)
@@ -153,7 +241,12 @@ def puerto_disponible():
 
 
 if __name__ == "__main__":
-    inicializar_bd()
+    try:
+        inicializar_bd()
+    except sqlite3.Error as error:
+        print(f"No se pudo acceder a la base de datos: {error}")
+        raise SystemExit(1)
+
     if not puerto_disponible():
         print(f"No se pudo iniciar el servidor: el puerto {PORT} ya está en uso.")
     else:
